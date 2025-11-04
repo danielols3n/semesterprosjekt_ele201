@@ -84,18 +84,20 @@ void glue_update_state(void);
 
 // Firmware Glue
 
-struct user_inputs {
-  char user_input[100];
-};
-void glue_get_user_inputs(struct user_inputs *);
-void glue_set_user_inputs(struct user_inputs *);
-
 struct lights {
   bool brake;
   bool front;
 };
 void glue_get_lights(struct lights *);
 void glue_set_lights(struct lights *);
+
+struct status {
+  int speed;
+  char user_input[100];
+};
+void glue_get_status(struct status *);
+void glue_set_status(struct status *);
+
 
 
 #ifdef __cplusplus

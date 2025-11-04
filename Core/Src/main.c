@@ -81,7 +81,18 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
-
+char car_status[64] = "Braking";
+uint16_t PWM_Value2 = 0;
+uint16_t PWM_Value3 = 0;
+uint16_t PWM_Value4 = 0;
+uint16_t PWM_Value5 = 0;
+uint16_t aksx; 						/* Fra akselerometer */
+uint16_t aksy; 						/* Fra akselerometer */
+uint16_t fart_input = 0; 			/* Kontroller fart */
+uint16_t turning_input = 0; 		/* Fra joystick */
+uint16_t current_speed = 0; 		/* Kalkulert med akselerasjon */
+bool front_lights = false;			/* Status for front lights on car */
+bool brake_lights = false;			/* Status for brake lights on car */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -97,17 +108,67 @@ static void MX_TIM4_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
-struct leds {
-    bool ld1;
+struct car_lights {
+    bool front_light;
+    bool brake_light;
 };
-// static struct leds s_leds = {false};
-void my_get_leds(struct leds *data) {
-	data -> ld1 = HAL_GPIO_ReadPin(LD1_GPIO_Port, LD1_Pin);
-	printf("Get called");
+
+struct car_status {
+	char status[64];
+	int speed;
+};
+
+void BrakeStatusTask(void *argument) {
+    for (;;) {
+        // Update the brake light variable based on car state
+        brake_lights = strcmp(car_status, "Braking") == 0;
+
+        // Update GPIO hardware
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, brake_lights ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+        osDelay(200); // every 200ms
+    }
 }
-void my_set_leds(struct leds *data) {
-	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, data -> ld1);
-	printf("Set called");
+
+void ButtonTask(void *argument) {
+    for (;;) {
+        GPIO_PinState btn = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
+
+        if (btn == GPIO_PIN_SET) {
+            strcpy(car_status, "Driving");
+        }
+
+        osDelay(100);
+    }
+}
+
+void set_lights(struct lights *data) {
+    front_lights = data -> front;
+    brake_lights = data -> brake;
+
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_6, front_lights ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, brake_lights ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+    printf("Lights updated: front=%d, brake=%d\r\n", data -> front, data -> brake);
+}
+
+void get_lights(struct lights *data) {
+    data -> front = front_lights;
+    data -> brake = brake_lights;
+
+    printf("Lights read: front=%d, brake=%d\r\n", data -> front, data -> brake);
+}
+
+void get_status(struct status *data) {
+    data -> speed = current_speed;
+    strcpy(data -> user_input, car_status);
+    printf("Status GET: speed=%d, user_input=%s\r\n", data -> speed, data -> user_input);
+}
+
+void set_status(struct status *data) {
+    current_speed = data -> speed;
+    strcpy(car_status, data -> user_input);
+    printf("Status SET: speed=%d, user_input=%s\r\n", current_speed, car_status);
 }
 /* USER CODE END PFP */
 
@@ -168,7 +229,10 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
-
+	HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_2);
+	HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_1);
+	HAL_TIM_PWM_Start(&htim4,TIM_CHANNEL_1);
+	HAL_TIM_PWM_Start(&htim4,TIM_CHANNEL_2);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -193,6 +257,8 @@ int main(void)
   /* Create the thread(s) */
   /* creation of defaultTask */
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+  osThreadNew(BrakeStatusTask, NULL, NULL);
+  osThreadNew(ButtonTask, NULL, NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -211,10 +277,121 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
+        /* USER CODE END WHILE */
 
-    /* USER CODE BEGIN 3 */
-  }
+      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, PWM_Value2);
+      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, PWM_Value3);
+      __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, PWM_Value4);
+      __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, PWM_Value5);
+
+      printf("USER_Btn = %d\r\n", HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin));
+      HAL_Delay(200);
+
+      if (strcmp(car_status, "Braking") == 0) {
+          brake_lights = true;
+          HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
+      } else {
+          brake_lights = false;
+          HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_RESET);
+      }
+
+      if ((HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET)) {
+    	  strcpy(car_status, "Driving");
+      }
+
+        /*Når bilen har bremset og skal kjøre frem*/
+        if (fart_input > 2045 && current_speed >= 0 && turning_input < 2400)
+          {
+            PWM_Value4 = (4095 / 2045)*(fart_input - 2045);
+            PWM_Value5 = 0;
+
+            PWM_Value2 = (4095 / 2045)*(fart_input - 2045);
+            PWM_Value3 = 0;
+            strcpy(car_status, "Driving");
+          }
+
+        if (fart_input <= 2045 && current_speed <= 0)
+          {
+            PWM_Value4 = 0;
+            PWM_Value5 = -(4095/2045) * fart_input + 4095;
+
+            PWM_Value2 = 0;
+            PWM_Value3 = -(4095/2045) * fart_input + 4095;
+            strcpy(car_status, "Driving");
+          }
+
+        /*Når bilen skal bremse og den kjører fremover*/
+
+        if (current_speed > 0 && fart_input <= 2045)
+          {
+            PWM_Value4 = 0;
+            PWM_Value5 = 0;
+
+            PWM_Value2 = 0;
+            PWM_Value3 = 0;
+            strcpy(car_status, "Braking");
+          }
+
+          /*Når bilen skal bremse og den kjører bakover*/
+
+        if (current_speed < 0 && fart_input >= 2045)
+          {
+            PWM_Value2 = 0;
+            PWM_Value3 = 0;
+
+            PWM_Value4 = 0;
+            PWM_Value5 = 0;
+            strcpy(car_status, "Braking");
+          }
+
+          /*Svinging når bilen kjører frammover*/
+
+        if (current_speed >= 0 && fart_input >= 2045 && turning_input < 1800)
+          {
+            PWM_Value4 = (4095 / 2045)*(fart_input - 2045);
+            PWM_Value5 = 0;
+
+            PWM_Value2 = (4095 / 2045)*(fart_input - 2045) - 500;
+            PWM_Value3 = 0;
+            strcpy(car_status, "Turning left");
+          }
+
+        if (current_speed >= 0 && fart_input >= 2045 && turning_input > 2400)
+          {
+            PWM_Value4 =   (4095 / 2045)*(fart_input - 2045) - 500;
+            PWM_Value5 = 0;
+
+            PWM_Value2 = (4095 / 2045)*(fart_input - 2045);
+            PWM_Value3 = 0;
+            strcpy(car_status, "Turning left");
+          }
+
+        if (current_speed <= 2045 && fart_input <= 2045)
+          {
+            PWM_Value4 = 0;
+            PWM_Value5 = -(4095/2045) * fart_input + 4095;
+
+            PWM_Value2 = 0;
+            PWM_Value3 = -(4095/2045) * fart_input + 4095 - 500;
+            strcpy(car_status, "Turning right");
+          }
+
+        if (current_speed <= 2045 && fart_input <= 2045 && turning_input < 1800)
+          {
+            PWM_Value4 = 0;
+            PWM_Value5 = -(4095/2045) * fart_input + 4095 - 500;
+
+            PWM_Value2 = 0;
+            PWM_Value3 = -(4095/2045) * fart_input + 4095;
+            strcpy(car_status, "Turning right");
+          }
+
+
+        HAL_Delay(200);
+
+
+        /* USER CODE BEGIN 3 */
+      }
   /* USER CODE END 3 */
 }
 
@@ -611,14 +788,24 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOG_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, LD1_Pin|GPIO_PIN_14|GPIO_PIN_7, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, LD1_Pin|GPIO_PIN_14|GPIO_PIN_7|GPIO_PIN_8, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : LD1_Pin PB14 PB7 */
-  GPIO_InitStruct.Pin = LD1_Pin|GPIO_PIN_14|GPIO_PIN_7;
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_6, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : LD1_Pin PB14 PB7 PB8 */
+  GPIO_InitStruct.Pin = LD1_Pin|GPIO_PIN_14|GPIO_PIN_7|GPIO_PIN_8;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PC6 */
+  GPIO_InitStruct.Pin = GPIO_PIN_6;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PB6 PB9 */
   GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_9;
@@ -628,6 +815,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /* Configure GPIO pin : PC13 (USER Button) */
+  GPIO_InitStruct.Pin = USER_Btn_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(USER_Btn_GPIO_Port, &GPIO_InitStruct);
   /* USER CODE BEGIN MX_GPIO_Init_2 */
   /* USER CODE END MX_GPIO_Init_2 */
 }
@@ -647,14 +839,16 @@ void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
   mongoose_init();
-  mongoose_set_http_handlers("leds", my_get_leds, my_set_leds);
+  mongoose_set_http_handlers("lights", get_lights, set_lights, NULL);					// Handler for sending/getting the lights status on the car
+  mongoose_set_http_handlers("status", get_status, set_status, NULL);					// Handler for sending/getting the status to/from API endpoint
   for (;;) {
     mongoose_poll();
+    glue_update_state();
   }
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+	  osDelay(100);
   }
   /* USER CODE END 5 */
 }

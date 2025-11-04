@@ -5,14 +5,6 @@
 // Default mock implementation of the API callbacks
 
 #include "mongoose_glue.h"
-static struct user_inputs s_user_inputs = {""};
-void glue_get_user_inputs(struct user_inputs *data) {
-  *data = s_user_inputs;  // Sync with your device
-}
-void glue_set_user_inputs(struct user_inputs *data) {
-  s_user_inputs = *data; // Sync with your device
-}
-
 static struct lights s_lights = {false, false};
 void glue_get_lights(struct lights *data) {
   *data = s_lights;  // Sync with your device
@@ -20,3 +12,12 @@ void glue_get_lights(struct lights *data) {
 void glue_set_lights(struct lights *data) {
   s_lights = *data; // Sync with your device
 }
+
+static struct status s_status = {0, "Idle"};
+void glue_get_status(struct status *data) {
+  *data = s_status;  // Sync with your device
+}
+void glue_set_status(struct status *data) {
+  s_status = *data; // Sync with your device
+}
+

@@ -127,22 +127,23 @@ struct apihandler_array {
   uint64_t (*sizer)(void);             // Array size, for data handlers only
 };
 
-struct attribute s_user_inputs_attributes[] = {
-  {"user_input", "string", NULL, offsetof(struct user_inputs, user_input), 100, false},
-  {NULL, NULL, NULL, 0, 0, false}
-};
 struct attribute s_lights_attributes[] = {
   {"brake", "bool", NULL, offsetof(struct lights, brake), 0, false},
   {"front", "bool", NULL, offsetof(struct lights, front), 0, false},
   {NULL, NULL, NULL, 0, 0, false}
 };
+struct attribute s_status_attributes[] = {
+  {"speed", "int", NULL, offsetof(struct status, speed), 0, false},
+  {"user_input", "string", NULL, offsetof(struct status, user_input), 100, false},
+  {NULL, NULL, NULL, 0, 0, false}
+};
 
-struct apihandler_data s_apihandler_user_inputs = {{"user_inputs", "data", false, 0, 0, 0UL}, s_user_inputs_attributes, sizeof(struct user_inputs), (void (*)(void *)) glue_get_user_inputs, (void (*)(void *)) glue_set_user_inputs};
 struct apihandler_data s_apihandler_lights = {{"lights", "data", false, 0, 0, 0UL}, s_lights_attributes, sizeof(struct lights), (void (*)(void *)) glue_get_lights, (void (*)(void *)) glue_set_lights};
+struct apihandler_data s_apihandler_status = {{"status", "data", false, 0, 0, 0UL}, s_status_attributes, sizeof(struct status), (void (*)(void *)) glue_get_status, (void (*)(void *)) glue_set_status};
 
 static struct apihandler *s_apihandlers[] = {
-  (struct apihandler *) &s_apihandler_user_inputs,
-  (struct apihandler *) &s_apihandler_lights
+  (struct apihandler *) &s_apihandler_lights,
+  (struct apihandler *) &s_apihandler_status
 };
 
 static struct apihandler *get_api_handler(struct mg_str name) {
