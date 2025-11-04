@@ -1,0 +1,4 @@
+../mongoose/mongoose_glue.c:9:6:glue_get_user_inputs	1
+../mongoose/mongoose_glue.c:12:6:glue_set_user_inputs	1
+../mongoose/mongoose_glue.c:17:6:glue_get_lights	1
+../mongoose/mongoose_glue.c:20:6:glue_set_lights	1
