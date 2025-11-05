@@ -97,7 +97,7 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
-char car_status[64] = "Braking";
+char car_status[64] = "Idle";
 uint16_t PWM_Value2 = 0;
 uint16_t PWM_Value3 = 0;
 uint16_t PWM_Value4 = 0;
@@ -154,6 +154,23 @@ void CarControlTask(void *argument) {
 		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, PWM_Value3);
 		__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, PWM_Value4);
 		__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, PWM_Value5);
+
+		HAL_ADC_Start(&hadc1);
+		HAL_ADC_Start(&hadc2);
+
+		HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+		HAL_ADC_PollForConversion(&hadc2, HAL_MAX_DELAY);
+
+		turning_input = HAL_ADC_GetValue(&hadc1);
+		fart_input = HAL_ADC_GetValue(&hadc2);
+
+		printf("Turning input: %d\n\r", turning_input);
+		printf("Fart input: %d\n\r", fart_input);
+
+		HAL_ADC_Start(&hadc1);
+		HAL_ADC_Start(&hadc2);
+
+		HAL_Delay(10);
 
 		  /*Når bilen har bremset og skal kjøre frem*/
 		  if (fart_input > 2045 && current_speed >= 0 && turning_input < 2400)
@@ -214,15 +231,15 @@ void CarControlTask(void *argument) {
 
 		  if (current_speed >= 0 && fart_input >= 2045 && turning_input > 2400)
 			{
-			  PWM_Value4 =   (4095 / 2045)*(fart_input - 2045) - 500;
+			  PWM_Value4 = (4095 / 2045)*(fart_input - 2045) - 500;
 			  PWM_Value5 = 0;
 
 			  PWM_Value2 = (4095 / 2045)*(fart_input - 2045);
 			  PWM_Value3 = 0;
-			  strcpy(car_status, "Turning left");
+			  strcpy(car_status, "Turning right");
 			}
 
-		  if (current_speed <= 2045 && fart_input <= 2045)
+		  if (current_speed <= 2045 && fart_input <= 2045 && turning_input > 2400)
 			{
 			  PWM_Value4 = 0;
 			  PWM_Value5 = -(4095/2045) * fart_input + 4095;
@@ -239,24 +256,12 @@ void CarControlTask(void *argument) {
 
 			  PWM_Value2 = 0;
 			  PWM_Value3 = -(4095/2045) * fart_input + 4095;
-			  strcpy(car_status, "Turning right");
+			  strcpy(car_status, "Turning left");
 			}
 
 
 
-        osDelay(200); // every 200ms
-    }
-}
-
-void ButtonTask(void *argument) {
-    for (;;) {
-        GPIO_PinState btn = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
-
-        if (btn == GPIO_PIN_SET) {
-            strcpy(car_status, "Driving");
-        }
-
-        osDelay(100);
+        osDelay(200);
     }
 }
 
@@ -290,13 +295,61 @@ void I2CTask(void *argument) {
 		    float y_akslerasjon = (y_akse*2*G)/8092.0;
 		    float z_akslerasjon = (z_akse*2*G)/8092.0;
 
-		    current_speed = current_speed + y_akslerasjon * 0.1; 					// Calculate the speed in y-direction
+		    if (y_akslerasjon < 0) {
+		    	current_speed = 0;// Calculate the speed in y-direction
+		    } else {
+		    	current_speed = current_speed + y_akslerasjon * 0.1;
+		    }
 
 		    printf("x-akse: %4.2f m/s^2, y-akse: %4.2f m/s^2,z-akse: %4.2f m/s^2\r\n",
 		        x_akslerasjon,y_akslerasjon,z_akslerasjon);
 
-		        osDelay(100);
+		        osDelay(1000);
 	}
+}
+
+void MMA8451_InitTask(void *argument) {
+    uint8_t tx_data;
+    uint8_t ctrl2_value, ctrl1_value, whoami_value, fstatus_value;
+    HAL_StatusTypeDef status;
+
+    // Give the rest of the system (especially Ethernet) time to initialize
+    osDelay(500);
+
+    // Software-reset MMA8451
+    tx_data = 1 << 6;
+    status = HAL_I2C_Mem_Write(&hi2c1, MMA8451_ADDR << 1, CTRL2, 1, &tx_data, 1, 100);
+    if (status != HAL_OK) {
+        printf("I2C write failed (reset): %d\r\n", status);
+    }
+
+    osDelay(100); // give it some time, but not 1s
+
+    HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, CTRL2, 1, &ctrl2_value, 1, 100);
+    HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, CTRL1, 1, &ctrl1_value, 1, 100);
+    HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, WHOAMI_REG, 1, &whoami_value, 1, 100);
+    HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, F_STATUS, 1, &fstatus_value, 1, 100);
+
+    printf("Etter reset: ctrl2:%02X ctrl1:%02X whoami:%02X fstatus:%02X\r\n",
+           ctrl2_value, ctrl1_value, whoami_value, fstatus_value);
+
+    // Set ACTIVE mode
+    tx_data = 1;
+    HAL_I2C_Mem_Write(&hi2c1, MMA8451_ADDR << 1, CTRL1, 1, &tx_data, 1, 100);
+    osDelay(100);
+
+    HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, CTRL1, 1, &ctrl1_value, 1, 100);
+    printf("Etter config: CTRL1:%02X\r\n", ctrl1_value);
+
+    printf("MMA8451 init complete!\r\n");
+
+    osThreadNew(I2CTask, NULL, NULL);
+
+    vTaskDelete(NULL);  // kill this init task, it’s done
+
+    for (;;) {
+        osDelay(1000);
+    }
 }
 
 void set_lights(struct lights *data) {
@@ -357,7 +410,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-	uint8_t i2c_data;
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -392,40 +445,7 @@ int main(void)
 	HAL_TIM_PWM_Start(&htim4,TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim4,TIM_CHANNEL_2);
 
-	uint8_t rx_data;
-
-	// Software-reset av MMA8451
-	uint8_t tx_data = 1<<6;
-	HAL_I2C_Mem_Write(&hi2c1,MMA8451_ADDR<<1,CTRL2,1,&tx_data,1,HAL_MAX_DELAY);
-	HAL_Delay(1000);
-	uint8_t ctrl2_value;
-	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, CTRL2, 1, &ctrl2_value, 1, HAL_MAX_DELAY);
-
-	uint8_t ctrl1_value;
-	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, CTRL1, 1, &ctrl1_value, 1, HAL_MAX_DELAY);
-
-	uint8_t whoami_value;
-	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, WHOAMI_REG, 1, &whoami_value, 1, HAL_MAX_DELAY);
-
-	uint8_t fstatus_value;
-	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, F_STATUS, 1, &fstatus_value, 1, HAL_MAX_DELAY);
-
-	printf("Etter reset: ctrl2: %02X ctrl1: %02X whoami: %02X fstatus: %02X\n",
-			ctrl2_value, ctrl1_value, whoami_value, fstatus_value);
-
-	// Set config til ACTIVE
-	tx_data = 1;
-	HAL_I2C_Mem_Write(&hi2c1,MMA8451_ADDR<<1,CTRL1,1,&tx_data,1,HAL_MAX_DELAY);
-	HAL_Delay(100);
-
-	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, CTRL2, 1, &ctrl2_value, 1, HAL_MAX_DELAY);
-	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, CTRL1, 1, &ctrl1_value, 1, HAL_MAX_DELAY);
-	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, WHOAMI_REG, 1, &whoami_value, 1, HAL_MAX_DELAY);
-	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, F_STATUS, 1, &fstatus_value, 1, HAL_MAX_DELAY);
-
-	printf("Etter config: ctrl2: %02X ctrl1: %02X whoami: %02X fstatus: %02X\r\n",
-			ctrl2_value, ctrl1_value, whoami_value, fstatus_value);
-  /* USER CODE END 2 */
+	/* USER CODE END 2 */
 
   /* Init scheduler */
   osKernelInitialize();
@@ -449,10 +469,9 @@ int main(void)
   /* Create the thread(s) */
   /* creation of defaultTask */
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+  osThreadNew(MMA8451_InitTask, NULL, NULL);
   osThreadNew(BrakeStatusTask, NULL, NULL);
   osThreadNew(CarControlTask, NULL, NULL);
-  osThreadNew(ButtonTask, NULL, NULL);
-  osThreadNew(I2CTask, NULL, NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */

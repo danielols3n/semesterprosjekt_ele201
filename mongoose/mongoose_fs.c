@@ -4382,7 +4382,7 @@ static const struct packed_file {
   size_t size;
   time_t mtime;
 } packed_files[] = {
-  {"/web_root/index.html.gz", v1, sizeof(v1), 1762285686},
+  {"/web_root/index.html.gz", v1, sizeof(v1), 1762337800},
   {NULL, NULL, 0, 0}
 };
 
