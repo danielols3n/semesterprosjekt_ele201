@@ -173,7 +173,7 @@ void CarControlTask(void *argument) {
 		HAL_Delay(10);
 
 		  /*Når bilen har bremset og skal kjøre frem*/
-		  if (fart_input > 2045 && current_speed >= 0 && turning_input < 2400)
+		  if (fart_input > 2045 && current_speed >= 0)
 			{
 			  PWM_Value4 = (4095 / 2045)*(fart_input - 2045);
 			  PWM_Value5 = 0;
@@ -295,10 +295,13 @@ void I2CTask(void *argument) {
 		    float y_akslerasjon = (y_akse*2*G)/8092.0;
 		    float z_akslerasjon = (z_akse*2*G)/8092.0;
 
-		    if (y_akslerasjon < 0) {
-		    	current_speed = 0;// Calculate the speed in y-direction
+		    if (
+		        (y_akslerasjon > -0.7 && y_akslerasjon < 0.7) &&
+		        (x_akslerasjon > -0.7 && x_akslerasjon < 0.7)
+		    ) {
+		        current_speed = 0;
 		    } else {
-		    	current_speed = current_speed + y_akslerasjon * 0.1;
+		        current_speed = current_speed + y_akslerasjon * 0.1;
 		    }
 
 		    printf("x-akse: %4.2f m/s^2, y-akse: %4.2f m/s^2,z-akse: %4.2f m/s^2\r\n",
