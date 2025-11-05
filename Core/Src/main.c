@@ -20,6 +20,7 @@
 #include "main.h"
 #include "string.h"
 #include "cmsis_os.h"
+#include <stdio.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -33,7 +34,20 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define MMA8451_ADDR 0x1D
+#define F_STATUS 0x00
+#define X_MSB 0x01
+#define X_LSB 0x02
+#define Y_MSB 0x03
+#define Y_LSB 0x04
+#define Z_MSB 0x05
+#define Z_LSB 0x06
+#define WHOAMI_REG 0x0D
+#define CTRL1 0x2A
+#define CTRL2 0x2B
+#define G 9.8
 
+asm(".global _printf_float");
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -66,6 +80,8 @@ ADC_HandleTypeDef hadc2;
 
 ETH_HandleTypeDef heth;
 
+I2C_HandleTypeDef hi2c1;
+
 RNG_HandleTypeDef hrng;
 
 TIM_HandleTypeDef htim3;
@@ -90,7 +106,7 @@ uint16_t aksx; 						/* Fra akselerometer */
 uint16_t aksy; 						/* Fra akselerometer */
 uint16_t fart_input = 0; 			/* Kontroller fart */
 uint16_t turning_input = 0; 		/* Fra joystick */
-uint16_t current_speed = 0; 		/* Kalkulert med akselerasjon */
+float current_speed = 0; 			/* Kalkulert med akselerasjon */
 bool front_lights = false;			/* Status for front lights on car */
 bool brake_lights = false;			/* Status for brake lights on car */
 /* USER CODE END PV */
@@ -105,6 +121,7 @@ static void MX_ADC1_Init(void);
 static void MX_ADC2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
+static void MX_I2C1_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
@@ -130,6 +147,107 @@ void BrakeStatusTask(void *argument) {
     }
 }
 
+void CarControlTask(void *argument) {
+    for (;;) {
+        // Update the brake light variable based on car state
+    	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, PWM_Value2);
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, PWM_Value3);
+		__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, PWM_Value4);
+		__HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, PWM_Value5);
+
+		  /*Når bilen har bremset og skal kjøre frem*/
+		  if (fart_input > 2045 && current_speed >= 0 && turning_input < 2400)
+			{
+			  PWM_Value4 = (4095 / 2045)*(fart_input - 2045);
+			  PWM_Value5 = 0;
+
+			  PWM_Value2 = (4095 / 2045)*(fart_input - 2045);
+			  PWM_Value3 = 0;
+			  strcpy(car_status, "Driving");
+			}
+
+		  if (fart_input <= 2045 && current_speed <= 0)
+			{
+			  PWM_Value4 = 0;
+			  PWM_Value5 = -(4095/2045) * fart_input + 4095;
+
+			  PWM_Value2 = 0;
+			  PWM_Value3 = -(4095/2045) * fart_input + 4095;
+			  strcpy(car_status, "Driving");
+			}
+
+		  /*Når bilen skal bremse og den kjører fremover*/
+
+		  if (current_speed > 0 && fart_input <= 2045)
+			{
+			  PWM_Value4 = 0;
+			  PWM_Value5 = 0;
+
+			  PWM_Value2 = 0;
+			  PWM_Value3 = 0;
+			  strcpy(car_status, "Braking");
+			}
+
+			/*Når bilen skal bremse og den kjører bakover*/
+
+		  if (current_speed < 0 && fart_input >= 2045)
+			{
+			  PWM_Value2 = 0;
+			  PWM_Value3 = 0;
+
+			  PWM_Value4 = 0;
+			  PWM_Value5 = 0;
+			  strcpy(car_status, "Braking");
+			}
+
+			/*Svinging når bilen kjører frammover*/
+
+		  if (current_speed >= 0 && fart_input >= 2045 && turning_input < 1800)
+			{
+			  PWM_Value4 = (4095 / 2045)*(fart_input - 2045);
+			  PWM_Value5 = 0;
+
+			  PWM_Value2 = (4095 / 2045)*(fart_input - 2045) - 500;
+			  PWM_Value3 = 0;
+			  strcpy(car_status, "Turning left");
+			}
+
+		  if (current_speed >= 0 && fart_input >= 2045 && turning_input > 2400)
+			{
+			  PWM_Value4 =   (4095 / 2045)*(fart_input - 2045) - 500;
+			  PWM_Value5 = 0;
+
+			  PWM_Value2 = (4095 / 2045)*(fart_input - 2045);
+			  PWM_Value3 = 0;
+			  strcpy(car_status, "Turning left");
+			}
+
+		  if (current_speed <= 2045 && fart_input <= 2045)
+			{
+			  PWM_Value4 = 0;
+			  PWM_Value5 = -(4095/2045) * fart_input + 4095;
+
+			  PWM_Value2 = 0;
+			  PWM_Value3 = -(4095/2045) * fart_input + 4095 - 500;
+			  strcpy(car_status, "Turning right");
+			}
+
+		  if (current_speed <= 2045 && fart_input <= 2045 && turning_input < 1800)
+			{
+			  PWM_Value4 = 0;
+			  PWM_Value5 = -(4095/2045) * fart_input + 4095 - 500;
+
+			  PWM_Value2 = 0;
+			  PWM_Value3 = -(4095/2045) * fart_input + 4095;
+			  strcpy(car_status, "Turning right");
+			}
+
+
+
+        osDelay(200); // every 200ms
+    }
+}
+
 void ButtonTask(void *argument) {
     for (;;) {
         GPIO_PinState btn = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
@@ -140,6 +258,45 @@ void ButtonTask(void *argument) {
 
         osDelay(100);
     }
+}
+
+void I2CTask(void *argument) {
+	for (;;) {
+		int8_t x_msb_value;
+		    uint8_t x_lsb_value;
+		    HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, X_MSB, 1, &x_msb_value, 1, HAL_MAX_DELAY);
+		    HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, X_LSB, 1, &x_lsb_value, 1, HAL_MAX_DELAY);
+		    int16_t x_akse = (x_msb_value << 8 | x_lsb_value); // 4;
+		    x_akse /= 4;
+		    printf("x_msb: %02x: x_lsb %02x,x-akse: %i\r\n", x_msb_value, x_lsb_value, x_akse);
+
+		    int8_t y_msb_value;
+		    uint8_t y_lsb_value;
+		    HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, Y_MSB, 1, &y_msb_value, 1, HAL_MAX_DELAY);
+		    HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, Y_LSB, 1, &y_lsb_value, 1, HAL_MAX_DELAY);
+		    int16_t y_akse = (y_msb_value << 8 | y_lsb_value); // 4;
+		    y_akse /= 4;
+		    printf("y_msb: %02x: y_lsb %02x,y-akse: %i\r\n", y_msb_value, y_lsb_value, y_akse);
+
+		    int8_t z_msb_value;
+		    uint8_t z_lsb_value;
+		    HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, Z_MSB, 1, &z_msb_value, 1, HAL_MAX_DELAY);
+		    HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, Z_LSB, 1, &z_lsb_value, 1, HAL_MAX_DELAY);
+		    int16_t z_akse = (z_msb_value << 8 | z_lsb_value); // 4;
+		    z_akse /= 4;
+		    printf("z_msb: %i: z_lsb %i,z-akse: %i\r\n", z_msb_value, z_lsb_value, z_akse);
+
+		    float x_akslerasjon = (x_akse*2*G)/8092.0;
+		    float y_akslerasjon = (y_akse*2*G)/8092.0;
+		    float z_akslerasjon = (z_akse*2*G)/8092.0;
+
+		    current_speed = current_speed + y_akslerasjon * 0.1; 					// Calculate the speed in y-direction
+
+		    printf("x-akse: %4.2f m/s^2, y-akse: %4.2f m/s^2,z-akse: %4.2f m/s^2\r\n",
+		        x_akslerasjon,y_akslerasjon,z_akslerasjon);
+
+		        osDelay(100);
+	}
 }
 
 void set_lights(struct lights *data) {
@@ -168,7 +325,7 @@ void get_status(struct status *data) {
 void set_status(struct status *data) {
     current_speed = data -> speed;
     strcpy(car_status, data -> user_input);
-    printf("Status SET: speed=%d, user_input=%s\r\n", current_speed, car_status);
+    printf("Status SET: speed=%.2f, user_input=%s\r\n", current_speed, car_status);
 }
 /* USER CODE END PFP */
 
@@ -200,7 +357,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+	uint8_t i2c_data;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -228,11 +385,46 @@ int main(void)
   MX_ADC2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 	HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_2);
 	HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim4,TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim4,TIM_CHANNEL_2);
+
+	uint8_t rx_data;
+
+	// Software-reset av MMA8451
+	uint8_t tx_data = 1<<6;
+	HAL_I2C_Mem_Write(&hi2c1,MMA8451_ADDR<<1,CTRL2,1,&tx_data,1,HAL_MAX_DELAY);
+	HAL_Delay(1000);
+	uint8_t ctrl2_value;
+	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, CTRL2, 1, &ctrl2_value, 1, HAL_MAX_DELAY);
+
+	uint8_t ctrl1_value;
+	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, CTRL1, 1, &ctrl1_value, 1, HAL_MAX_DELAY);
+
+	uint8_t whoami_value;
+	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, WHOAMI_REG, 1, &whoami_value, 1, HAL_MAX_DELAY);
+
+	uint8_t fstatus_value;
+	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, F_STATUS, 1, &fstatus_value, 1, HAL_MAX_DELAY);
+
+	printf("Etter reset: ctrl2: %02X ctrl1: %02X whoami: %02X fstatus: %02X\n",
+			ctrl2_value, ctrl1_value, whoami_value, fstatus_value);
+
+	// Set config til ACTIVE
+	tx_data = 1;
+	HAL_I2C_Mem_Write(&hi2c1,MMA8451_ADDR<<1,CTRL1,1,&tx_data,1,HAL_MAX_DELAY);
+	HAL_Delay(100);
+
+	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, CTRL2, 1, &ctrl2_value, 1, HAL_MAX_DELAY);
+	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, CTRL1, 1, &ctrl1_value, 1, HAL_MAX_DELAY);
+	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, WHOAMI_REG, 1, &whoami_value, 1, HAL_MAX_DELAY);
+	HAL_I2C_Mem_Read(&hi2c1, MMA8451_ADDR << 1, F_STATUS, 1, &fstatus_value, 1, HAL_MAX_DELAY);
+
+	printf("Etter config: ctrl2: %02X ctrl1: %02X whoami: %02X fstatus: %02X\r\n",
+			ctrl2_value, ctrl1_value, whoami_value, fstatus_value);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -258,7 +450,9 @@ int main(void)
   /* creation of defaultTask */
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
   osThreadNew(BrakeStatusTask, NULL, NULL);
+  osThreadNew(CarControlTask, NULL, NULL);
   osThreadNew(ButtonTask, NULL, NULL);
+  osThreadNew(I2CTask, NULL, NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -277,121 +471,10 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-        /* USER CODE END WHILE */
+          /* USER CODE END WHILE */
 
-      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, PWM_Value2);
-      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, PWM_Value3);
-      __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, PWM_Value4);
-      __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, PWM_Value5);
-
-      printf("USER_Btn = %d\r\n", HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin));
-      HAL_Delay(200);
-
-      if (strcmp(car_status, "Braking") == 0) {
-          brake_lights = true;
-          HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
-      } else {
-          brake_lights = false;
-          HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_RESET);
-      }
-
-      if ((HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET)) {
-    	  strcpy(car_status, "Driving");
-      }
-
-        /*Når bilen har bremset og skal kjøre frem*/
-        if (fart_input > 2045 && current_speed >= 0 && turning_input < 2400)
-          {
-            PWM_Value4 = (4095 / 2045)*(fart_input - 2045);
-            PWM_Value5 = 0;
-
-            PWM_Value2 = (4095 / 2045)*(fart_input - 2045);
-            PWM_Value3 = 0;
-            strcpy(car_status, "Driving");
-          }
-
-        if (fart_input <= 2045 && current_speed <= 0)
-          {
-            PWM_Value4 = 0;
-            PWM_Value5 = -(4095/2045) * fart_input + 4095;
-
-            PWM_Value2 = 0;
-            PWM_Value3 = -(4095/2045) * fart_input + 4095;
-            strcpy(car_status, "Driving");
-          }
-
-        /*Når bilen skal bremse og den kjører fremover*/
-
-        if (current_speed > 0 && fart_input <= 2045)
-          {
-            PWM_Value4 = 0;
-            PWM_Value5 = 0;
-
-            PWM_Value2 = 0;
-            PWM_Value3 = 0;
-            strcpy(car_status, "Braking");
-          }
-
-          /*Når bilen skal bremse og den kjører bakover*/
-
-        if (current_speed < 0 && fart_input >= 2045)
-          {
-            PWM_Value2 = 0;
-            PWM_Value3 = 0;
-
-            PWM_Value4 = 0;
-            PWM_Value5 = 0;
-            strcpy(car_status, "Braking");
-          }
-
-          /*Svinging når bilen kjører frammover*/
-
-        if (current_speed >= 0 && fart_input >= 2045 && turning_input < 1800)
-          {
-            PWM_Value4 = (4095 / 2045)*(fart_input - 2045);
-            PWM_Value5 = 0;
-
-            PWM_Value2 = (4095 / 2045)*(fart_input - 2045) - 500;
-            PWM_Value3 = 0;
-            strcpy(car_status, "Turning left");
-          }
-
-        if (current_speed >= 0 && fart_input >= 2045 && turning_input > 2400)
-          {
-            PWM_Value4 =   (4095 / 2045)*(fart_input - 2045) - 500;
-            PWM_Value5 = 0;
-
-            PWM_Value2 = (4095 / 2045)*(fart_input - 2045);
-            PWM_Value3 = 0;
-            strcpy(car_status, "Turning left");
-          }
-
-        if (current_speed <= 2045 && fart_input <= 2045)
-          {
-            PWM_Value4 = 0;
-            PWM_Value5 = -(4095/2045) * fart_input + 4095;
-
-            PWM_Value2 = 0;
-            PWM_Value3 = -(4095/2045) * fart_input + 4095 - 500;
-            strcpy(car_status, "Turning right");
-          }
-
-        if (current_speed <= 2045 && fart_input <= 2045 && turning_input < 1800)
-          {
-            PWM_Value4 = 0;
-            PWM_Value5 = -(4095/2045) * fart_input + 4095 - 500;
-
-            PWM_Value2 = 0;
-            PWM_Value3 = -(4095/2045) * fart_input + 4095;
-            strcpy(car_status, "Turning right");
-          }
-
-
-        HAL_Delay(200);
-
-
-        /* USER CODE BEGIN 3 */
-      }
+          /* USER CODE BEGIN 3 */
+  }
   /* USER CODE END 3 */
 }
 
@@ -603,6 +686,54 @@ static void MX_ETH_Init(void)
 }
 
 /**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x20404768;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
   * @brief RNG Initialization Function
   * @param None
   * @retval None
@@ -807,19 +938,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB6 PB9 */
-  GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_9;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /* Configure GPIO pin : PC13 (USER Button) */
-  GPIO_InitStruct.Pin = USER_Btn_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(USER_Btn_GPIO_Port, &GPIO_InitStruct);
   /* USER CODE BEGIN MX_GPIO_Init_2 */
   /* USER CODE END MX_GPIO_Init_2 */
 }
